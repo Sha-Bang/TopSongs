@@ -14,10 +14,7 @@ href = re.compile("<h1>(.*)</h1>\s*?<p class=\"chart_info\">\s*<.*?href.*?title=
 lyricHref = re.compile("id=\"lyrics-body-text\">(.*?)</div>")
 cleanHTML = re.compile("<.*?>")
 cleanSpace = re.compile("\+\++")
-global words
 words = {} #word:count
-delayTime = 5
-checkpointnum = 0
 
 
 
@@ -28,11 +25,12 @@ def main(numPages, args):
 	wordsQ = Queue()
 	print "total charts: ", numPages
 	for url in args:
-		for i in range(0, numPages+1):
+		for i in range(0, numPages):
+			print "%s%s" % (url, i)
 			billQ.put("%s%s" % (url, i))
 
 	billSearch = Process(target=grabBody, args=(billQ,googleQ))
-	googSearch = Process(target=googleSearch, args=(googleQ, lyricQ, delayTime))
+	googSearch = Process(target=googleSearch, args=(googleQ, lyricQ))
 	lyrSearch = Process(target=lyricSearch, args=(lyricQ, googleQ, wordsQ))
 	checkPt = Process(target=checkPoint, args=(billQ, googleQ, lyricQ, wordsQ))
 	
@@ -44,7 +42,7 @@ def main(numPages, args):
 	
 
 def grabBody(billQ, googleQ):
-	while billQ:
+	while not billQ.empty():
 		url = billQ.get()
 		x = urllib2.urlopen(url).read()
 		y = href.findall(x)
@@ -54,10 +52,12 @@ def grabBody(billQ, googleQ):
 			print "grabBody ", link
 			link = (link[0], link[1], "site:www.metrolyrics.com")
 			googleQ.put(" ".join(link))
+	print "!!STATUS!! billQ DONE"
 	
 
-def googleSearch(googleQ, lyricQ, delayTime):
-	while googleQ:
+def googleSearch(googleQ, lyricQ):
+	delayTime = 5
+	while not googleQ.empty():
 		origQuery = googleQ.get()
 		sleep(int(delayTime))
 		url = "http://ajax.googleapis.com/ajax/services/search/web?v=1.0&"
@@ -85,15 +85,15 @@ def googleSearch(googleQ, lyricQ, delayTime):
 			if delayTime>=180:
 				delayTime=180
 		except:
-			print "failed on: ", query
+			print "#GS: failed on: ", query
 			delayTime= delayTime * 1.7
-			print "delayTime: ", delayTime
+			print "#GS: delayTime: ", delayTime
 			googleQ.put(origQuery)
 		
+	print "!!STATUS!! googleSearch DONE"
 
 def lyricSearch(lyricQ, googleQ, wordsQ):
-	global words
-	while lyricQ or googleQ:
+	while not lyricQ.empty() or not googleQ.empty():
 		url = lyricQ.get()
 		try:
 			print "trying: ", url
@@ -107,27 +107,35 @@ def lyricSearch(lyricQ, googleQ, wordsQ):
 
 		except:
 			print "wah2"
+	
+	print "!!STATUS!! lyricSearch DONE"
 
 def checkPoint(billQ, googleQ, lyricQ, wordsQ):
 	words = {}
-	lastTime = time()
+	lastTime = 0 #fast 1st checkpoint
+	checkpointnum = 0
 
 
-
-	while billQ or googleQ or lyricQ or wordsQ:
-		if wordsQ:
+	while not billQ.empty() or not googleQ.empty() or not lyricQ.empty() or not wordsQ.empty():
+		if not wordsQ.empty():
 			word = wordsQ.get()
 			words.setdefault(word, 0)
 			words[word]+=1
-		if words and time() > lastTime+15:
+		if time() > lastTime+10:
 			lastTime = time()
 			sys.stderr.write("Checkpointing\n")
 			print "checkpointing"
 			write(words, str(int(time()))+" "+str(checkpointnum))
+			checkpointnum+=1
 			print "*"*50
+#			print "*"*10, billQ.qsize(), googleQ.qsize(), lyricQ.qsize(), wordsQ.qsize(), "*"*10
+#			print "*"*50
 			sys.stdout.flush()
 			sys.stderr.flush()
 
+	print "!!STATUS!! checkPoint DONE"
+	sys.stdout.flush()
+	sys.stderr.flush()
 
 
 def write(words, filename="out.txt"):
